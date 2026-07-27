@@ -1,0 +1,5 @@
+venv/
+__pycache__/
+*.zip
+.DS_Store
+cache_geo.json
