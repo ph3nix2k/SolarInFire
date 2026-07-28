@@ -6,6 +6,7 @@ from folium.plugins import MarkerCluster, HeatMap
 import plotly.express as px
 import glob
 import math
+import os
 from geocoding import get_coordinates_batch
 
 st.set_page_config(page_title="Dashboard Feux & Solaire", layout="wide")
@@ -83,10 +84,9 @@ def main():
     df['Color_Delai'] = cat_col.apply(lambda x: x[1])
         
     # --- SIDEBAR: Logo & Titre ---
-    try:
-        st.sidebar.image("assets/logo.png", use_container_width=True)
-    except:
-        pass
+    logo_path = os.path.join(os.path.dirname(__file__), "assets", "logo.jpg")
+    if os.path.exists(logo_path):
+        st.sidebar.image(logo_path, use_container_width=True)
     st.sidebar.markdown("<h2 style='text-align: center; margin-top: -15px;'>FireToSolar</h2>", unsafe_allow_html=True)
     st.sidebar.markdown("---")
         
