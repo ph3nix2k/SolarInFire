@@ -147,19 +147,6 @@ def main():
     # =========================================================
     # LAYOUT PRINCIPAL (ONGLETS)
     # =========================================================
-    st.markdown("### 📈 Vue d'ensemble")
-    
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Communes impactées", f"{len(df_filtered):,}".replace(",", " "))
-    col2.metric("Puissance Totale", f"{df_filtered['Puissance_Totale_MW'].sum():.1f} MW")
-    col3.metric("Surface Brûlée", f"{df_filtered['Surface_Brûlée_ha'].sum():.1f} ha")
-    
-    valid_delays = df_filtered[df_filtered['Delai_Mois'] >= 0]['Delai_Mois']
-    avg_delay = valid_delays.mean() if not valid_delays.empty else 0
-    col4.metric("Délai moyen (si post-feu)", f"{avg_delay:.1f} mois")
-    
-    st.markdown("---")
-
     tab_map, tab_analysis = st.tabs(["🗺️ Carte Interactive", "📊 Analyses Détaillées"])
 
     with tab_map:
@@ -239,9 +226,22 @@ def main():
         # Ajout du contrôle de calques (pour basculer entre les fonds de carte)
         folium.LayerControl(position='topright').add_to(m)
     
-        st_folium(m, use_container_width=True, height=750)
+        st_folium(m, use_container_width=True, height=850)
 
     with tab_analysis:
+        st.markdown("### 📈 Vue d'ensemble")
+        
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Communes impactées", f"{len(df_filtered):,}".replace(",", " "))
+        col2.metric("Puissance Totale", f"{df_filtered['Puissance_Totale_MW'].sum():.1f} MW")
+        col3.metric("Surface Brûlée", f"{df_filtered['Surface_Brûlée_ha'].sum():.1f} ha")
+        
+        valid_delays = df_filtered[df_filtered['Delai_Mois'] >= 0]['Delai_Mois']
+        avg_delay = valid_delays.mean() if not valid_delays.empty else 0
+        col4.metric("Délai moyen (si post-feu)", f"{avg_delay:.1f} mois")
+        
+        st.markdown("---")
+        
         if not df_filtered.empty:
             c1, c2 = st.columns(2)
             
