@@ -45,6 +45,10 @@ def load_data():
     delta_days = (df['Premiere_Mise_en_Service'] - df['Date_du_Feu']).dt.days
     df['Delai_Mois'] = delta_days / 30.44
     
+    # Conversions d'unités
+    df['Puissance_Totale_MW'] = df['Puissance_Totale_kW'] / 1000.0
+    df['Surface_Brûlée_ha'] = df['Surface_Brûlée_m2'] / 10000.0
+    
     # Géocodage
     # Formater le code INSEE sur 5 caractères au cas où
     df['Code INSEE'] = df['Code INSEE'].str.zfill(5)
@@ -95,20 +99,20 @@ def main():
     selected_year = st.sidebar.slider("Année du feu", min_value=min_year, max_value=max_year, value=(min_year, max_year))
     
     # 2. Puissance
-    min_puissance = float(df['Puissance_Totale_kW'].min()) if not df['Puissance_Totale_kW'].empty else 0.0
-    max_puissance = float(df['Puissance_Totale_kW'].max()) if not df['Puissance_Totale_kW'].empty else 1000.0
+    min_puissance = float(df['Puissance_Totale_MW'].min()) if not df['Puissance_Totale_MW'].empty else 0.0
+    max_puissance = float(df['Puissance_Totale_MW'].max()) if not df['Puissance_Totale_MW'].empty else 1.0
     selected_puissance = st.sidebar.slider(
-        "Puissance Totale (kW)", 
+        "Puissance Totale (MW)", 
         min_value=min_puissance, 
         max_value=max_puissance, 
         value=(min_puissance, max_puissance)
     )
     
     # 3. Surface
-    min_surface = float(df['Surface_Brûlée_m2'].min()) if not df['Surface_Brûlée_m2'].empty else 0.0
-    max_surface = float(df['Surface_Brûlée_m2'].max()) if not df['Surface_Brûlée_m2'].empty else 10000.0
+    min_surface = float(df['Surface_Brûlée_ha'].min()) if not df['Surface_Brûlée_ha'].empty else 0.0
+    max_surface = float(df['Surface_Brûlée_ha'].max()) if not df['Surface_Brûlée_ha'].empty else 1.0
     selected_surface = st.sidebar.slider(
-        "Surface Brûlée (m²)", 
+        "Surface Brûlée (ha)", 
         min_value=min_surface, 
         max_value=max_surface, 
         value=(min_surface, max_surface)
@@ -130,8 +134,8 @@ def main():
     # --- FILTRAGE DES DONNEES ---
     mask = (
         (df['Annee_du_Feu'] >= selected_year[0]) & (df['Annee_du_Feu'] <= selected_year[1]) &
-        (df['Puissance_Totale_kW'] >= selected_puissance[0]) & (df['Puissance_Totale_kW'] <= selected_puissance[1]) &
-        (df['Surface_Brûlée_m2'] >= selected_surface[0]) & (df['Surface_Brûlée_m2'] <= selected_surface[1]) &
+        (df['Puissance_Totale_MW'] >= selected_puissance[0]) & (df['Puissance_Totale_MW'] <= selected_puissance[1]) &
+        (df['Surface_Brûlée_ha'] >= selected_surface[0]) & (df['Surface_Brûlée_ha'] <= selected_surface[1]) &
         # Garder les points où le délai est inférieur au max, ET ceux où le délai n'a pas pu être calculé
         ((df['Delai_Mois'] <= selected_max_delai) | (df['Delai_Mois'].isna()) | (df['Delai_Mois'] < 0)) 
     )
@@ -179,10 +183,10 @@ def main():
             <b style="font-size: 15px;">{row['Commune']} ({row['Département']})</b><br/>
             <hr style="margin: 5px 0;">
             <b>Date du feu:</b> {date_feu}<br/>
-            <b>Surface brûlée:</b> {row['Surface_Brûlée_m2']} m²<br/>
+            <b>Surface brûlée:</b> {round(row['Surface_Brûlée_ha'], 2)} ha<br/>
             <hr style="margin: 5px 0;">
             <b>Nb parcs solaires:</b> {row['Nombre_de_Parcs_Solaires']}<br/>
-            <b>Puissance totale:</b> {row['Puissance_Totale_kW']} kW<br/>
+            <b>Puissance totale:</b> {round(row['Puissance_Totale_MW'], 2)} MW<br/>
             <b>1ère M.E.S:</b> {date_mes}<br/>
             <b>Délai:</b> {delai_str} mois<br/>
         </div>
