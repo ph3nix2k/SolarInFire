@@ -112,7 +112,11 @@ def main():
     st.sidebar.markdown("---")
     st.sidebar.header("🗺️ Paramètres de la carte")
     map_type = st.sidebar.radio("Type d'affichage", ["Cercles (Top 1000)", "Regroupement (Cluster)", "Carte de chaleur (Heatmap)"])
-    base_map = st.sidebar.radio("Fond de carte", ["Clair (CartoDB)", "Satellite (Esri)"])
+    
+    st.sidebar.info("💡 Vous pouvez désormais changer le fond de carte (Satellite) directement sur la carte, en haut à droite !")
+
+    st.sidebar.markdown("---")
+    st.sidebar.caption("v1.1.0")
 
     # --- FILTRAGE ---
     mask = (
@@ -141,14 +145,13 @@ def main():
     st.markdown("---")
     
     # --- CARTE FOLIUM ---
-    if base_map == "Satellite (Esri)":
-        m = folium.Map(location=[46.603354, 1.888334], zoom_start=6, tiles=None)
-        folium.TileLayer(
-            tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-            attr='Esri', name='Esri Satellite'
-        ).add_to(m)
-    else:
-        m = folium.Map(location=[46.603354, 1.888334], zoom_start=6, tiles="CartoDB positron")
+    m = folium.Map(location=[46.603354, 1.888334], zoom_start=6, tiles="CartoDB positron", name="Clair (CartoDB)")
+    
+    folium.TileLayer(
+        tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        attr='Esri', name='Satellite (Esri)',
+        overlay=False, control=True
+    ).add_to(m)
     
     max_p_filtered = df_filtered['Puissance_Totale_kW'].max() if not df_filtered.empty else 1
     
@@ -214,6 +217,9 @@ def main():
     '''
     m.get_root().html.add_child(folium.Element(legend_html))
 
+    # Ajout du contrôle de calques (pour basculer entre les fonds de carte)
+    folium.LayerControl(position='topright').add_to(m)
+
     st_folium(m, use_container_width=True, height=700)
     
     # --- GRAPHIQUES PLOTLY ---
@@ -241,6 +247,17 @@ def main():
                 st.plotly_chart(fig_bar, use_container_width=True)
             else:
                 st.info("Pas de données de mise en service pour générer le graphique temporel.")
+
+    # --- SOURCES ---
+    st.markdown("---")
+    st.markdown("""
+    <div style="color: gray; font-size: 14px;">
+        <b>Sources des données (Open Data) :</b><br/>
+        - <b>Feux de Forêts</b> : Base de Données sur les Incendies de Forêts en France (BDIFF) / Prométhée<br/>
+        - <b>Parcs Solaires</b> : Registre National des installations de production d'électricité et de biogaz (ODRÉ)<br/>
+        - <b>Géocodage</b> : API Géo (geo.api.gouv.fr)
+    </div>
+    """, unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
