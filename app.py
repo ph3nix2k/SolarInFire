@@ -123,9 +123,6 @@ def main():
     
     st.sidebar.info("💡 Vous pouvez désormais changer le fond de carte (Satellite) directement sur la carte, en haut à droite !")
 
-    st.sidebar.markdown("---")
-    st.sidebar.caption("v1.1.0")
-
     # --- FILTRAGE ---
     mask = (
         (df['Annee_du_Feu'] >= selected_year[0]) & (df['Annee_du_Feu'] <= selected_year[1]) &
@@ -139,119 +136,136 @@ def main():
         
     df_filtered = df[mask].copy()
     
-    # --- KPIs ---
-    st.markdown("### 📈 Vue d'ensemble")
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Communes impactées", f"{len(df_filtered):,}".replace(",", " "))
-    col2.metric("Puissance Totale", f"{df_filtered['Puissance_Totale_MW'].sum():.1f} MW")
-    col3.metric("Surface Brûlée", f"{df_filtered['Surface_Brûlée_ha'].sum():.1f} ha")
+    # --- COMPTEUR DYNAMIQUE POST-FEU ---
+    nb_post_feu = len(df_filtered[df_filtered['Delai_Mois'] >= 0])
+    st.sidebar.markdown("---")
+    st.sidebar.metric("Parcs installés APRÈS un feu", f"{nb_post_feu:,}".replace(",", " "))
     
-    valid_delays = df_filtered[df_filtered['Delai_Mois'] >= 0]['Delai_Mois']
-    avg_delay = valid_delays.mean() if not valid_delays.empty else 0
-    col4.metric("Délai moyen (si post-feu)", f"{avg_delay:.1f} mois")
-    
-    st.markdown("---")
-    
-    # --- CARTE FOLIUM ---
-    m = folium.Map(location=[46.603354, 1.888334], zoom_start=6, tiles="CartoDB positron", name="Clair (CartoDB)")
-    
-    folium.TileLayer(
-        tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-        attr='Esri', name='Satellite (Esri)',
-        overlay=False, control=True
-    ).add_to(m)
-    
-    max_p_filtered = df_filtered['Puissance_Totale_kW'].max() if not df_filtered.empty else 1
-    
-    def get_tooltip(row):
-        date_feu = row['Date_du_Feu'].strftime('%d/%m/%Y') if not pd.isna(row['Date_du_Feu']) else "Inconnue"
-        date_mes = row['Premiere_Mise_en_Service'].strftime('%d/%m/%Y') if not pd.isna(row['Premiere_Mise_en_Service']) else "Inconnue"
-        delai_str = f"{round(row['Delai_Mois'], 1)}" if not pd.isna(row['Delai_Mois']) else "N/A"
-        
-        return f"""
-        <div style="font-family: Arial; font-size: 13px; width: 250px;">
-            <b style="font-size: 15px;">{row['Commune']} ({row['Département']})</b><br/>
-            <hr style="margin: 5px 0;">
-            <b>Date du feu:</b> {date_feu}<br/>
-            <b>Surface brûlée:</b> {round(row['Surface_Brûlée_ha'], 2)} ha<br/>
-            <hr style="margin: 5px 0;">
-            <b>Nb parcs solaires:</b> {row['Nombre_de_Parcs_Solaires']}<br/>
-            <b>Puissance totale:</b> {round(row['Puissance_Totale_MW'], 2)} MW<br/>
-            <b>1ère M.E.S:</b> {date_mes}<br/>
-            <b>Délai:</b> {delai_str} mois<br/>
-        </div>
-        """
+    st.sidebar.markdown("---")
+    st.sidebar.caption("v1.1.0")
 
-    if map_type == "Cercles (Top 1000)":
-        MAX_POINTS = 1000
-        df_render = df_filtered
-        if len(df_filtered) > MAX_POINTS:
-            st.warning(f"⚠️ Pour des raisons de fluidité, seuls les {MAX_POINTS} parcs les plus puissants sont affichés sur la carte. Utilisez le mode 'Regroupement' pour tout voir.")
-            df_render = df_filtered.sort_values(by='Puissance_Totale_MW', ascending=False).head(MAX_POINTS)
+    # =========================================================
+    # LAYOUT PRINCIPAL (2 COLONNES)
+    # =========================================================
+    col_map, col_analysis = st.columns([2.5, 1.5], gap="large")
+    
+    with col_map:
+        st.markdown("### 🗺️ Carte Interactive")
+        
+        # --- CARTE FOLIUM ---
+        m = folium.Map(location=[46.603354, 1.888334], zoom_start=6, tiles="CartoDB positron", name="Clair (CartoDB)")
+        
+        folium.TileLayer(
+            tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+            attr='Esri', name='Satellite (Esri)',
+            overlay=False, control=True
+        ).add_to(m)
+        
+        max_p_filtered = df_filtered['Puissance_Totale_kW'].max() if not df_filtered.empty else 1
+        
+        def get_tooltip(row):
+            date_feu = row['Date_du_Feu'].strftime('%d/%m/%Y') if not pd.isna(row['Date_du_Feu']) else "Inconnue"
+            date_mes = row['Premiere_Mise_en_Service'].strftime('%d/%m/%Y') if not pd.isna(row['Premiere_Mise_en_Service']) else "Inconnue"
+            delai_str = f"{round(row['Delai_Mois'], 1)}" if not pd.isna(row['Delai_Mois']) else "N/A"
             
-        for _, row in df_render.iterrows():
-            p = row['Puissance_Totale_kW']
-            radius = 3 + 17 * (math.sqrt(p) / math.sqrt(max_p_filtered)) if (not pd.isna(p) and p > 0 and max_p_filtered > 0) else 4
-            folium.CircleMarker(
-                location=[row['lat'], row['lon']], radius=radius,
-                color=row['Color_Delai'], fill=True, fill_color=row['Color_Delai'], fill_opacity=0.7, weight=1,
-                tooltip=folium.Tooltip(get_tooltip(row))
-            ).add_to(m)
-
-    elif map_type == "Regroupement (Cluster)":
-        marker_cluster = MarkerCluster().add_to(m)
-        for _, row in df_filtered.iterrows():
-            folium.CircleMarker(
-                location=[row['lat'], row['lon']], radius=6,
-                color=row['Color_Delai'], fill=True, fill_color=row['Color_Delai'], fill_opacity=0.9, weight=1,
-                tooltip=folium.Tooltip(get_tooltip(row))
-            ).add_to(marker_cluster)
-
-    elif map_type == "Carte de chaleur (Heatmap)":
-        heat_data = [[row['lat'], row['lon'], row['Puissance_Totale_MW']] for _, row in df_filtered.iterrows() if not pd.isna(row['Puissance_Totale_MW'])]
-        HeatMap(heat_data, radius=15).add_to(m)
-        
-    # Légende HTML
-    legend_html = '''
-    <div style="position: fixed; bottom: 50px; left: 50px; width: 160px; height: 140px; 
-                border:2px solid grey; z-index:9999; font-size:12px; background-color:white; opacity: 0.9; padding: 10px;">
-        <b>Délai Feu -> M.E.S</b><br>
-        <i class="fa fa-circle" style="color:gray"></i> Pré-existant<br>
-        <i class="fa fa-circle" style="color:red"></i> &lt; 1 an<br>
-        <i class="fa fa-circle" style="color:orange"></i> 1 à 2 ans<br>
-        <i class="fa fa-circle" style="color:green"></i> &gt; 2 ans<br>
-        <i class="fa fa-circle" style="color:lightgray"></i> Inconnu
-    </div>
-    '''
-    m.get_root().html.add_child(folium.Element(legend_html))
-
-    # Ajout du contrôle de calques (pour basculer entre les fonds de carte)
-    folium.LayerControl(position='topright').add_to(m)
-
-    st_folium(m, use_container_width=True, height=700)
+            return f"""
+            <div style="font-family: Arial; font-size: 13px; width: 250px;">
+                <b style="font-size: 15px;">{row['Commune']} ({row['Département']})</b><br/>
+                <hr style="margin: 5px 0;">
+                <b>Date du feu:</b> {date_feu}<br/>
+                <b>Surface brûlée:</b> {round(row['Surface_Brûlée_ha'], 2)} ha<br/>
+                <hr style="margin: 5px 0;">
+                <b>Nb parcs solaires:</b> {row['Nombre_de_Parcs_Solaires']}<br/>
+                <b>Puissance totale:</b> {round(row['Puissance_Totale_MW'], 2)} MW<br/>
+                <b>1ère M.E.S:</b> {date_mes}<br/>
+                <b>Délai:</b> {delai_str} mois<br/>
+            </div>
+            """
     
-    # --- GRAPHIQUES PLOTLY ---
-    st.markdown("---")
-    st.markdown("### 📊 Analyses Détaillées")
+        if map_type == "Cercles (Top 1000)":
+            MAX_POINTS = 1000
+            df_render = df_filtered
+            if len(df_filtered) > MAX_POINTS:
+                st.warning(f"⚠️ Pour des raisons de fluidité, seuls les {MAX_POINTS} parcs les plus puissants sont affichés sur la carte. Utilisez le mode 'Regroupement' pour tout voir.")
+                df_render = df_filtered.sort_values(by='Puissance_Totale_MW', ascending=False).head(MAX_POINTS)
+                
+            for _, row in df_render.iterrows():
+                p = row['Puissance_Totale_kW']
+                radius = 3 + 17 * (math.sqrt(p) / math.sqrt(max_p_filtered)) if (not pd.isna(p) and p > 0 and max_p_filtered > 0) else 4
+                folium.CircleMarker(
+                    location=[row['lat'], row['lon']], radius=radius,
+                    color=row['Color_Delai'], fill=True, fill_color=row['Color_Delai'], fill_opacity=0.7, weight=1,
+                    tooltip=folium.Tooltip(get_tooltip(row))
+                ).add_to(m)
     
-    if not df_filtered.empty:
-        c1, c2 = st.columns(2)
+        elif map_type == "Regroupement (Cluster)":
+            marker_cluster = MarkerCluster().add_to(m)
+            for _, row in df_filtered.iterrows():
+                folium.CircleMarker(
+                    location=[row['lat'], row['lon']], radius=6,
+                    color=row['Color_Delai'], fill=True, fill_color=row['Color_Delai'], fill_opacity=0.9, weight=1,
+                    tooltip=folium.Tooltip(get_tooltip(row))
+                ).add_to(marker_cluster)
+    
+        elif map_type == "Carte de chaleur (Heatmap)":
+            heat_data = [[row['lat'], row['lon'], row['Puissance_Totale_MW']] for _, row in df_filtered.iterrows() if not pd.isna(row['Puissance_Totale_MW'])]
+            HeatMap(heat_data, radius=15).add_to(m)
+            
+        # Légende HTML
+        legend_html = '''
+        <div style="position: fixed; bottom: 50px; left: 50px; width: 160px; height: 140px; 
+                    border:2px solid grey; z-index:9999; font-size:12px; background-color:white; opacity: 0.9; padding: 10px;">
+            <b>Délai Feu -> M.E.S</b><br>
+            <i class="fa fa-circle" style="color:gray"></i> Pré-existant<br>
+            <i class="fa fa-circle" style="color:red"></i> &lt; 1 an<br>
+            <i class="fa fa-circle" style="color:orange"></i> 1 à 2 ans<br>
+            <i class="fa fa-circle" style="color:green"></i> &gt; 2 ans<br>
+            <i class="fa fa-circle" style="color:lightgray"></i> Inconnu
+        </div>
+        '''
+        m.get_root().html.add_child(folium.Element(legend_html))
+    
+        # Ajout du contrôle de calques (pour basculer entre les fonds de carte)
+        folium.LayerControl(position='topright').add_to(m)
+    
+        st_folium(m, use_container_width=True, height=750)
+
+
+    with col_analysis:
+        st.markdown("### 📈 Vue d'ensemble")
         
-        with c1:
+        kpi1, kpi2 = st.columns(2)
+        kpi1.metric("Communes impactées", f"{len(df_filtered):,}".replace(",", " "))
+        kpi2.metric("Puissance Totale", f"{df_filtered['Puissance_Totale_MW'].sum():.1f} MW")
+        
+        kpi3, kpi4 = st.columns(2)
+        kpi3.metric("Surface Brûlée", f"{df_filtered['Surface_Brûlée_ha'].sum():.1f} ha")
+        
+        valid_delays = df_filtered[df_filtered['Delai_Mois'] >= 0]['Delai_Mois']
+        avg_delay = valid_delays.mean() if not valid_delays.empty else 0
+        kpi4.metric("Délai moyen (si post-feu)", f"{avg_delay:.1f} mois")
+        
+        st.markdown("---")
+        st.markdown("### 📊 Analyses Détaillées")
+        
+        if not df_filtered.empty:
             delay_counts = df_filtered['Categorie_Delai'].value_counts().reset_index()
             delay_counts.columns = ['Catégorie', 'Nombre']
             color_map = {'Pré-existant': 'gray', '< 1 an': 'red', '1 à 2 ans': 'orange', '> 2 ans': 'green', 'Inconnu': 'lightgray'}
+            
             fig_pie = px.pie(delay_counts, values='Nombre', names='Catégorie', title="Répartition des délais de construction", color='Catégorie', color_discrete_map=color_map, hole=0.4)
+            fig_pie.update_layout(margin=dict(t=40, b=10, l=10, r=10), height=320)
             st.plotly_chart(fig_pie, use_container_width=True)
 
-        with c2:
             df_filtered['Annee_MES'] = df_filtered['Premiere_Mise_en_Service'].dt.year
             df_valid_mes = df_filtered.dropna(subset=['Annee_MES']).copy()
             if not df_valid_mes.empty:
                 df_valid_mes['Annee_MES'] = df_valid_mes['Annee_MES'].astype(int)
                 mes_counts = df_valid_mes['Annee_MES'].value_counts().reset_index().sort_values('Annee_MES')
                 mes_counts.columns = ['Année', 'Nombre de parcs']
+                
                 fig_bar = px.bar(mes_counts, x='Année', y='Nombre de parcs', title="Mises en service par année")
+                fig_bar.update_layout(margin=dict(t=40, b=10, l=10, r=10), height=320)
                 st.plotly_chart(fig_bar, use_container_width=True)
             else:
                 st.info("Pas de données de mise en service pour générer le graphique temporel.")
