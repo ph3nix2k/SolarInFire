@@ -147,8 +147,8 @@ def main():
     # Sécurité pour ne pas faire crasher le navigateur avec 10000 points SVG :
     MAX_POINTS = 1000
     if len(df_filtered) > MAX_POINTS:
-        st.warning(f"⚠️ Pour des raisons de fluidité, seuls les {MAX_POINTS} parcs les plus puissants sont affichés sur la carte.")
-        df_filtered = df_filtered.sort_values(by='Puissance_Totale_kW', ascending=False).head(MAX_POINTS)
+        st.warning(f"⚠️ Pour des raisons de fluidité, seuls les {MAX_POINTS} parcs les plus puissants sont affichés sur la carte. En utilisant les filtres sur la gauche, vous pourrez réduire ce nombre et faire apparaître le reste des données !")
+        df_filtered = df_filtered.sort_values(by='Puissance_Totale_MW', ascending=False).head(MAX_POINTS)
         
     # --- CARTE FOLIUM ---
     # Coordonnées pour centrer sur la France
