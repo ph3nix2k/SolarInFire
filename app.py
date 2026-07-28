@@ -140,6 +140,12 @@ def main():
     
     st.write(f"Nombre de communes correspondantes : **{len(df_filtered)}** / {len(df)}")
     
+    # Sécurité pour ne pas faire crasher le navigateur avec 10000 points SVG :
+    MAX_POINTS = 1000
+    if len(df_filtered) > MAX_POINTS:
+        st.warning(f"⚠️ Pour des raisons de fluidité, seuls les {MAX_POINTS} parcs les plus puissants sont affichés sur la carte.")
+        df_filtered = df_filtered.sort_values(by='Puissance_Totale_kW', ascending=False).head(MAX_POINTS)
+        
     # --- CARTE FOLIUM ---
     # Coordonnées pour centrer sur la France
     m = folium.Map(location=[46.603354, 1.888334], zoom_start=6, tiles="CartoDB positron")
@@ -209,7 +215,7 @@ def main():
     m.get_root().html.add_child(folium.Element(legend_html))
 
     # Rendu Streamlit de la carte Folium
-    st_folium(m, width=1100, height=700, returned_objects=[])
+    st_folium(m, use_container_width=True, height=700)
 
 if __name__ == "__main__":
     main()
