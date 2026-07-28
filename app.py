@@ -116,13 +116,6 @@ def main():
     if pd.isna(max_delai) or max_delai < 0: max_delai = 120.0
     selected_max_delai = st.sidebar.slider("Délai max M.E.S (mois)", min_value=0, max_value=int(math.ceil(max_delai)), value=int(math.ceil(max_delai)))
     
-    # --- SIDEBAR: Paramètres Carte ---
-    st.sidebar.markdown("---")
-    st.sidebar.header("🗺️ Paramètres de la carte")
-    map_type = st.sidebar.radio("Type d'affichage", ["Cercles (Top 1000)", "Regroupement (Cluster)", "Carte de chaleur (Heatmap)"])
-    
-    st.sidebar.info("💡 Vous pouvez désormais changer le fond de carte (Satellite) directement sur la carte, en haut à droite !")
-
     # --- FILTRAGE ---
     mask = (
         (df['Annee_du_Feu'] >= selected_year[0]) & (df['Annee_du_Feu'] <= selected_year[1]) &
@@ -135,23 +128,41 @@ def main():
         mask = mask & df['Commune'].str.contains(search_commune, case=False, na=False)
         
     df_filtered = df[mask].copy()
-    
+
     # --- COMPTEUR DYNAMIQUE POST-FEU ---
     nb_post_feu = len(df_filtered[df_filtered['Delai_Mois'] >= 0])
     st.sidebar.markdown("---")
     st.sidebar.metric("Parcs installés APRÈS un feu", f"{nb_post_feu:,}".replace(",", " "))
     
+    # --- SIDEBAR: Paramètres Carte ---
+    st.sidebar.markdown("---")
+    st.sidebar.header("🗺️ Paramètres de la carte")
+    map_type = st.sidebar.radio("Type d'affichage", ["Cercles (Top 1000)", "Regroupement (Cluster)", "Carte de chaleur (Heatmap)"])
+    
+    st.sidebar.info("💡 Vous pouvez désormais changer le fond de carte (Satellite) directement sur la carte, en haut à droite !")
+
     st.sidebar.markdown("---")
     st.sidebar.caption("v1.1.0")
 
     # =========================================================
-    # LAYOUT PRINCIPAL (2 COLONNES)
+    # LAYOUT PRINCIPAL (ONGLETS)
     # =========================================================
-    col_map, col_analysis = st.columns([2.5, 1.5], gap="large")
+    st.markdown("### 📈 Vue d'ensemble")
     
-    with col_map:
-        st.markdown("### 🗺️ Carte Interactive")
-        
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Communes impactées", f"{len(df_filtered):,}".replace(",", " "))
+    col2.metric("Puissance Totale", f"{df_filtered['Puissance_Totale_MW'].sum():.1f} MW")
+    col3.metric("Surface Brûlée", f"{df_filtered['Surface_Brûlée_ha'].sum():.1f} ha")
+    
+    valid_delays = df_filtered[df_filtered['Delai_Mois'] >= 0]['Delai_Mois']
+    avg_delay = valid_delays.mean() if not valid_delays.empty else 0
+    col4.metric("Délai moyen (si post-feu)", f"{avg_delay:.1f} mois")
+    
+    st.markdown("---")
+
+    tab_map, tab_analysis = st.tabs(["🗺️ Carte Interactive", "📊 Analyses Détaillées"])
+
+    with tab_map:
         # --- CARTE FOLIUM ---
         m = folium.Map(location=[46.603354, 1.888334], zoom_start=6, tiles="CartoDB positron", name="Clair (CartoDB)")
         
@@ -230,45 +241,34 @@ def main():
     
         st_folium(m, use_container_width=True, height=750)
 
-
-    with col_analysis:
-        st.markdown("### 📈 Vue d'ensemble")
-        
-        kpi1, kpi2 = st.columns(2)
-        kpi1.metric("Communes impactées", f"{len(df_filtered):,}".replace(",", " "))
-        kpi2.metric("Puissance Totale", f"{df_filtered['Puissance_Totale_MW'].sum():.1f} MW")
-        
-        kpi3, kpi4 = st.columns(2)
-        kpi3.metric("Surface Brûlée", f"{df_filtered['Surface_Brûlée_ha'].sum():.1f} ha")
-        
-        valid_delays = df_filtered[df_filtered['Delai_Mois'] >= 0]['Delai_Mois']
-        avg_delay = valid_delays.mean() if not valid_delays.empty else 0
-        kpi4.metric("Délai moyen (si post-feu)", f"{avg_delay:.1f} mois")
-        
-        st.markdown("---")
-        st.markdown("### 📊 Analyses Détaillées")
-        
+    with tab_analysis:
         if not df_filtered.empty:
-            delay_counts = df_filtered['Categorie_Delai'].value_counts().reset_index()
-            delay_counts.columns = ['Catégorie', 'Nombre']
-            color_map = {'Pré-existant': 'gray', '< 1 an': 'red', '1 à 2 ans': 'orange', '> 2 ans': 'green', 'Inconnu': 'lightgray'}
+            c1, c2 = st.columns(2)
             
-            fig_pie = px.pie(delay_counts, values='Nombre', names='Catégorie', title="Répartition des délais de construction", color='Catégorie', color_discrete_map=color_map, hole=0.4)
-            fig_pie.update_layout(margin=dict(t=40, b=10, l=10, r=10), height=320)
-            st.plotly_chart(fig_pie, use_container_width=True)
-
-            df_filtered['Annee_MES'] = df_filtered['Premiere_Mise_en_Service'].dt.year
-            df_valid_mes = df_filtered.dropna(subset=['Annee_MES']).copy()
-            if not df_valid_mes.empty:
-                df_valid_mes['Annee_MES'] = df_valid_mes['Annee_MES'].astype(int)
-                mes_counts = df_valid_mes['Annee_MES'].value_counts().reset_index().sort_values('Annee_MES')
-                mes_counts.columns = ['Année', 'Nombre de parcs']
+            with c1:
+                delay_counts = df_filtered['Categorie_Delai'].value_counts().reset_index()
+                delay_counts.columns = ['Catégorie', 'Nombre']
+                color_map = {'Pré-existant': 'gray', '< 1 an': 'red', '1 à 2 ans': 'orange', '> 2 ans': 'green', 'Inconnu': 'lightgray'}
                 
-                fig_bar = px.bar(mes_counts, x='Année', y='Nombre de parcs', title="Mises en service par année")
-                fig_bar.update_layout(margin=dict(t=40, b=10, l=10, r=10), height=320)
-                st.plotly_chart(fig_bar, use_container_width=True)
-            else:
-                st.info("Pas de données de mise en service pour générer le graphique temporel.")
+                fig_pie = px.pie(delay_counts, values='Nombre', names='Catégorie', title="Répartition des délais de construction", color='Catégorie', color_discrete_map=color_map, hole=0.4)
+                fig_pie.update_layout(margin=dict(t=40, b=10, l=10, r=10), height=500)
+                st.plotly_chart(fig_pie, use_container_width=True)
+    
+            with c2:
+                df_filtered['Annee_MES'] = df_filtered['Premiere_Mise_en_Service'].dt.year
+                df_valid_mes = df_filtered.dropna(subset=['Annee_MES']).copy()
+                if not df_valid_mes.empty:
+                    df_valid_mes['Annee_MES'] = df_valid_mes['Annee_MES'].astype(int)
+                    mes_counts = df_valid_mes['Annee_MES'].value_counts().reset_index().sort_values('Annee_MES')
+                    mes_counts.columns = ['Année', 'Nombre de parcs']
+                    
+                    fig_bar = px.bar(mes_counts, x='Année', y='Nombre de parcs', title="Mises en service par année")
+                    fig_bar.update_layout(margin=dict(t=40, b=10, l=10, r=10), height=500)
+                    st.plotly_chart(fig_bar, use_container_width=True)
+                else:
+                    st.info("Pas de données de mise en service pour générer le graphique temporel.")
+        else:
+            st.info("Aucune donnée pour afficher les analyses.")
 
     # --- SOURCES ---
     st.markdown("---")
