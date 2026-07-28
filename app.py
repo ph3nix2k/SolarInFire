@@ -11,47 +11,71 @@ from geocoding import get_coordinates_batch
 
 st.set_page_config(page_title="Dashboard Feux & Solaire", layout="wide")
 
+import json
+
 @st.cache_data
 def load_data():
-    """Charge et prépare les données CSV, incluant le géocodage."""
-    csv_files = glob.glob("data/NotebookLM_Feux_Solaire_Allege_*.csv")
-    if not csv_files:
-        st.error("Aucun fichier CSV trouvé dans le répertoire.")
+    """Charge et prépare les données CSV, incluant le géocodage et l'agrégation."""
+    file_path = "data/App_Carto_Solaire_Feux_2020_2025.csv"
+    if not os.path.exists(file_path):
+        st.error(f"Fichier {file_path} introuvable.")
         return pd.DataFrame()
     
-    df_list = []
-    for file in csv_files:
-        try:
-            df = pd.read_csv(file, dtype={'Code INSEE': str})
-            df_list.append(df)
-        except Exception as e:
-            st.warning(f"Erreur lors de la lecture de {file} : {e}")
-            
-    if not df_list:
+    try:
+        df = pd.read_csv(file_path, dtype={'Code INSEE': str, 'codeIRIS': str})
+    except Exception as e:
+        st.error(f"Erreur lors de la lecture des données : {e}")
         return pd.DataFrame()
         
-    df = pd.concat(df_list, ignore_index=True)
-    
     df['Date_du_Feu'] = pd.to_datetime(df['Date_du_Feu'], format='mixed', errors='coerce', dayfirst=True)
-    df['Premiere_Mise_en_Service'] = pd.to_datetime(df['Premiere_Mise_en_Service'], format='mixed', errors='coerce', dayfirst=True)
-    df['Derniere_Mise_en_Service'] = pd.to_datetime(df['Derniere_Mise_en_Service'], format='mixed', errors='coerce', dayfirst=True)
-
-    df['Annee_du_Feu'] = df['Date_du_Feu'].dt.year
+    df['Premiere_Mise_en_Service'] = pd.to_datetime(df['Date_de_Mise_en_Service'], format='mixed', errors='coerce', dayfirst=True)
     
+    df['Annee_du_Feu'] = df['Date_du_Feu'].dt.year
     delta_days = (df['Premiere_Mise_en_Service'] - df['Date_du_Feu']).dt.days
     df['Delai_Mois'] = delta_days / 30.44
     
-    df['Puissance_Totale_MW'] = df['Puissance_Totale_kW'] / 1000.0
-    df['Surface_Brûlée_ha'] = df['Surface_Brûlée_m2'] / 10000.0
+    # Agrégation par feu et par IRIS pour avoir un détail précis
+    grouped = df.groupby(['Commune', 'Code INSEE', 'Département', 'Date_du_Feu', 'Annee_du_Feu', 'codeIRIS'], dropna=False).agg(
+        Surface_Brûlée_m2=('Surface_Brûlée_m2', 'first'),
+        Puissance_Totale_kW=('Puissance_kW', 'sum'),
+        Premiere_Mise_en_Service=('Premiere_Mise_en_Service', 'min'),
+        Delai_Mois=('Delai_Mois', 'min'),
+        Nombre_de_Parcs_Solaires=('Nom_du_Parc_Solaire', 'count'),
+        Noms_Parcs=('Nom_du_Parc_Solaire', lambda x: '<br>- '.join(x.dropna().astype(str).unique()) if not x.dropna().empty else ""),
+        Codes_IRIS=('codeIRIS', lambda x: ', '.join(x.dropna().astype(str).unique()) if not x.dropna().empty else "")
+    ).reset_index()
     
-    df['Code INSEE'] = df['Code INSEE'].str.zfill(5)
-    unique_codes = df['Code INSEE'].dropna().unique().tolist()
+    grouped['Puissance_Totale_MW'] = grouped['Puissance_Totale_kW'] / 1000.0
+    grouped['Surface_Brûlée_ha'] = grouped['Surface_Brûlée_m2'] / 10000.0
+    
+    grouped['Code INSEE'] = grouped['Code INSEE'].str.zfill(5)
+    
+    # Dictionnaire de fallback (Communes)
+    unique_codes = grouped['Code INSEE'].dropna().unique().tolist()
     coords_dict = get_coordinates_batch(unique_codes)
     
-    df['lat'] = df['Code INSEE'].map(lambda code: coords_dict.get(code, (None, None))[0] if coords_dict.get(code) else None)
-    df['lon'] = df['Code INSEE'].map(lambda code: coords_dict.get(code, (None, None))[1] if coords_dict.get(code) else None)
+    # Dictionnaire IRIS
+    iris_coords_dict = {}
+    if os.path.exists('data/iris_coordinates.json'):
+        with open('data/iris_coordinates.json', 'r') as f:
+            iris_coords_dict = json.load(f)
+            
+    def get_lat(row):
+        c_iris = str(row.get('codeIRIS'))
+        if c_iris in iris_coords_dict:
+            return iris_coords_dict[c_iris][0]
+        return coords_dict.get(row['Code INSEE'], (None, None))[0]
+        
+    def get_lon(row):
+        c_iris = str(row.get('codeIRIS'))
+        if c_iris in iris_coords_dict:
+            return iris_coords_dict[c_iris][1]
+        return coords_dict.get(row['Code INSEE'], (None, None))[1]
     
-    df_clean = df.dropna(subset=['lat', 'lon']).copy()
+    grouped['lat'] = grouped.apply(get_lat, axis=1)
+    grouped['lon'] = grouped.apply(get_lon, axis=1)
+    
+    df_clean = grouped.dropna(subset=['lat', 'lon']).copy()
     
     return df_clean
 
@@ -167,14 +191,19 @@ def main():
             date_mes = row['Premiere_Mise_en_Service'].strftime('%d/%m/%Y') if not pd.isna(row['Premiere_Mise_en_Service']) else "Inconnue"
             delai_str = f"{round(row['Delai_Mois'], 1)}" if not pd.isna(row['Delai_Mois']) else "N/A"
             
+            iris_html = f"<b>Codes IRIS:</b> {row['Codes_IRIS']}<br/>" if row.get('Codes_IRIS') else ""
+            noms_html = f"<b>Noms:</b><br/><span style='font-size:11px;'>- {row['Noms_Parcs']}</span><br/>" if row.get('Noms_Parcs') else ""
+            
             return f"""
             <div style="font-family: Arial; font-size: 13px; width: 250px;">
                 <b style="font-size: 15px;">{row['Commune']} ({row['Département']})</b><br/>
                 <hr style="margin: 5px 0;">
                 <b>Date du feu:</b> {date_feu}<br/>
                 <b>Surface brûlée:</b> {round(row['Surface_Brûlée_ha'], 2)} ha<br/>
+                {iris_html}
                 <hr style="margin: 5px 0;">
                 <b>Nb parcs solaires:</b> {row['Nombre_de_Parcs_Solaires']}<br/>
+                {noms_html}
                 <b>Puissance totale:</b> {round(row['Puissance_Totale_MW'], 2)} MW<br/>
                 <b>1ère M.E.S:</b> {date_mes}<br/>
                 <b>Délai:</b> {delai_str} mois<br/>
@@ -233,9 +262,14 @@ def main():
         st.markdown("### 📈 Vue d'ensemble")
         
         col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Communes impactées", f"{len(df_filtered):,}".replace(",", " "))
-        col2.metric("Puissance Totale", f"{df_filtered['Puissance_Totale_MW'].sum():.1f} MW")
-        col3.metric("Surface Brûlée", f"{df_filtered['Surface_Brûlée_ha'].sum():.1f} ha")
+        
+        nb_communes = df_filtered['Code INSEE'].nunique()
+        puissance = df_filtered['Puissance_Totale_MW'].sum()
+        surface = df_filtered.groupby(['Code INSEE', 'Date_du_Feu'])['Surface_Brûlée_ha'].first().sum()
+        
+        col1.metric("Communes impactées", f"{nb_communes:,}".replace(",", " "))
+        col2.metric("Puissance Totale", f"{puissance:.1f} MW")
+        col3.metric("Surface Brûlée", f"{surface:.1f} ha")
         
         valid_delays = df_filtered[df_filtered['Delai_Mois'] >= 0]['Delai_Mois']
         avg_delay = valid_delays.mean() if not valid_delays.empty else 0
