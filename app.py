@@ -82,8 +82,16 @@ def main():
     df['Categorie_Delai'] = cat_col.apply(lambda x: x[0])
     df['Color_Delai'] = cat_col.apply(lambda x: x[1])
         
+    # --- SIDEBAR: Logo & Titre ---
+    try:
+        st.sidebar.image("assets/logo.png", use_container_width=True)
+    except:
+        pass
+    st.sidebar.markdown("<h2 style='text-align: center; margin-top: -15px;'>FireToSolar</h2>", unsafe_allow_html=True)
+    st.sidebar.markdown("---")
+        
     # --- SIDEBAR: Filtres ---
-    st.sidebar.header("🔍 Recherche & Filtres")
+    st.sidebar.header("🔍 Filtres")
     
     search_commune = st.sidebar.text_input("Rechercher une commune", "", placeholder="Ex: Bordeaux")
     
