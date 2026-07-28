@@ -13,7 +13,7 @@ st.set_page_config(page_title="Dashboard Feux & Solaire", layout="wide")
 
 import json
 
-@st.cache_data
+@st.cache_data(show_spinner=False)
 def load_data():
     """Charge et prépare les données CSV, incluant le géocodage et l'agrégation."""
     file_path = "data/App_Carto_Solaire_Feux_2020_2025.csv"
@@ -55,10 +55,45 @@ def load_data():
         with open('data/iris_coordinates.json', 'r') as f:
             iris_coords_dict = json.load(f)
             
-    # Géocodage intelligent (Niveau 1, 2, 3)
-    coords = grouped.apply(lambda row: geocode_row(row, iris_coords_dict), axis=1)
-    grouped['lat'] = coords.apply(lambda x: x[0] if x else None)
-    grouped['lon'] = coords.apply(lambda x: x[1] if x else None)
+    from geocoding import _GEO_CACHE
+    
+    progress_text = st.empty()
+    progress_bar = st.progress(0)
+    
+    total = len(grouped)
+    lats = []
+    lons = []
+    
+    for i, row in grouped.iterrows():
+        insee = str(row.get('Code INSEE')).zfill(5)
+        iris = str(row.get('codeIRIS')) if not pd.isna(row.get('codeIRIS')) else None
+        nom = str(row.get('Nom_du_Parc_Solaire'))
+        cache_key = f"{insee}_{nom}_{iris}"
+        
+        if cache_key not in _GEO_CACHE:
+            try:
+                puissance = float(row.get('Puissance_kW')) if not pd.isna(row.get('Puissance_kW')) else 0
+            except:
+                puissance = 0
+                
+            if puissance > 1000:
+                progress_text.info(f"🛰️ Recherche OpenStreetMap en cours pour le grand parc : {nom}...")
+            else:
+                progress_text.text(f"📍 Géocodage classique en cours : {nom}...")
+                
+        lat, lon = geocode_row(row, iris_coords_dict)
+        lats.append(lat)
+        lons.append(lon)
+        
+        # Mise à jour fluide de la barre de progression
+        if i % 5 == 0 or i == total - 1:
+            progress_bar.progress(min((i + 1) / total, 1.0))
+            
+    grouped['lat'] = lats
+    grouped['lon'] = lons
+    
+    progress_bar.empty()
+    progress_text.empty()
     
     # Sauvegarde du cache sur le disque
     flush_cache()
