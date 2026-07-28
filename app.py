@@ -86,8 +86,9 @@ def main():
     # --- SIDEBAR: Logo & Titre ---
     logo_path = os.path.join(os.path.dirname(__file__), "assets", "logo.jpg")
     if os.path.exists(logo_path):
-        st.sidebar.image(logo_path, use_column_width=True)
-    st.sidebar.markdown("<h2 style='text-align: center; margin-top: -15px;'>FireToSolar</h2>", unsafe_allow_html=True)
+        col1, col2, col3 = st.sidebar.columns([1, 2, 1])
+        with col2:
+            st.image(logo_path, use_column_width=True)
     st.sidebar.markdown("---")
         
     # --- SIDEBAR: Filtres ---
