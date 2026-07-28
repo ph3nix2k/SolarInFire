@@ -7,7 +7,7 @@ import plotly.express as px
 import glob
 import math
 import os
-from geocoding import get_coordinates_batch
+from geocoding import geocode_row, flush_cache
 
 st.set_page_config(page_title="Dashboard Feux & Solaire", layout="wide")
 
@@ -49,32 +49,19 @@ def load_data():
     grouped['Surface_Brûlée_ha'] = grouped['Surface_Brûlée_m2'] / 10000.0
     
     grouped['Code INSEE'] = grouped['Code INSEE'].str.zfill(5)
-    
-    # Dictionnaire de fallback (Communes)
-    unique_codes = grouped['Code INSEE'].dropna().unique().tolist()
-    coords_dict = get_coordinates_batch(unique_codes)
-    
-    # Dictionnaire IRIS
+    # Dictionnaire IRIS (chargé une seule fois pour la fonction map)
     iris_coords_dict = {}
     if os.path.exists('data/iris_coordinates.json'):
         with open('data/iris_coordinates.json', 'r') as f:
             iris_coords_dict = json.load(f)
             
-    def get_lat(row):
-        c_iris = str(row.get('codeIRIS'))
-        if c_iris in iris_coords_dict:
-            return iris_coords_dict[c_iris][0]
-        return coords_dict.get(row['Code INSEE'], (None, None))[0]
-        
-    def get_lon(row):
-        c_iris = str(row.get('codeIRIS'))
-        if c_iris in iris_coords_dict:
-            return iris_coords_dict[c_iris][1]
-        return coords_dict.get(row['Code INSEE'], (None, None))[1]
+    # Géocodage intelligent (Niveau 1, 2, 3)
+    coords = grouped.apply(lambda row: geocode_row(row, iris_coords_dict), axis=1)
+    grouped['lat'] = coords.apply(lambda x: x[0] if x else None)
+    grouped['lon'] = coords.apply(lambda x: x[1] if x else None)
     
-    grouped['lat'] = grouped.apply(get_lat, axis=1)
-    grouped['lon'] = grouped.apply(get_lon, axis=1)
-    
+    # Sauvegarde du cache sur le disque
+    flush_cache()
     df_clean = grouped.dropna(subset=['lat', 'lon']).copy()
     
     return df_clean

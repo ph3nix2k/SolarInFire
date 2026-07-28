@@ -3,8 +3,10 @@ import json
 import os
 import streamlit as st
 import logging
+import time
+import pandas as pd
 
-CACHE_FILE = "cache_geo.json"
+CACHE_FILE = "data/geocoding_cache.json"
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -28,53 +30,108 @@ def save_cache(cache_data):
 
 _GEO_CACHE = load_cache()
 
-@st.cache_data
-def get_coordinates_batch(codes_insee):
+# Load INSEE global cache
+_INSEE_CACHE = {}
+def get_insee_dict():
+    global _INSEE_CACHE
+    if _INSEE_CACHE: return _INSEE_CACHE
+    try:
+        url = "https://geo.api.gouv.fr/communes?fields=centre"
+        response = requests.get(url, timeout=15)
+        if response.status_code == 200:
+            for commune in response.json():
+                code = commune.get("code")
+                centre = commune.get("centre")
+                if code and centre and "coordinates" in centre:
+                    _INSEE_CACHE[code] = (centre["coordinates"][1], centre["coordinates"][0]) # lat, lon
+    except Exception as e:
+        logger.error(f"INSEE API Error: {e}")
+    return _INSEE_CACHE
+
+def overpass_geocode(insee_code, retries=3):
+    """Niveau 1: Requete Overpass API pour les gros parcs solaires."""
+    query = f'''
+    [out:json];
+    area["ref:INSEE"="{insee_code}"]->.a;
+    nwr["power"="generator"]["generator:source"="solar"](area.a);
+    out center;
+    '''
+    url = "https://overpass-api.de/api/interpreter"
+    headers = {"User-Agent": "Antigravity-SolarInFire/1.0"}
+    
+    for attempt in range(retries):
+        try:
+            resp = requests.post(url, data=query.encode('utf-8'), headers=headers, timeout=15)
+            if resp.status_code == 200:
+                data = resp.json()
+                elements = data.get("elements", [])
+                if elements:
+                    el = elements[0]
+                    if "center" in el:
+                        return el["center"]["lat"], el["center"]["lon"]
+                    elif "lat" in el and "lon" in el:
+                        return el["lat"], el["lon"]
+                return None # Aucun parc trouvé, on passe au fallback
+            elif resp.status_code in [429, 504]:
+                logger.warning(f"Overpass API busy ({resp.status_code}). Retrying {attempt+1}/{retries}...")
+                time.sleep(3 ** attempt) # Exponential backoff plus long
+            else:
+                logger.warning(f"Overpass API error {resp.status_code}")
+                return None
+        except Exception as e:
+            logger.warning(f"Overpass request failed: {e}")
+            time.sleep(2)
+            
+    return None
+
+def geocode_row(row, iris_dict):
     """
-    Récupère les coordonnées pour une liste de codes INSEE.
-    Optimisation : télécharge la base complète des communes si des codes manquent.
+    Stratégie 3 niveaux:
+    1. Overpass (si > 1000 kW)
+    2. IRIS (depuis iris_dict local)
+    3. INSEE (depuis api.gouv.fr centralisé)
     """
     global _GEO_CACHE
     
-    results = {}
-    codes_to_fetch = [code for code in codes_insee if code not in _GEO_CACHE]
+    insee = str(row.get('Code INSEE')).zfill(5)
+    iris = str(row.get('codeIRIS')) if not pd.isna(row.get('codeIRIS')) else None
     
-    # Si on a des codes manquants, on télécharge la base entière (très rapide ~3Mo)
-    # plutôt que de faire 1000 appels API individuels.
-    if codes_to_fetch:
-        logger.info(f"Chargement initial optimisé de toutes les communes (API gouv)...")
-        try:
-            url = "https://geo.api.gouv.fr/communes?fields=centre"
-            response = requests.get(url, timeout=15)
-            if response.status_code == 200:
-                data = response.json()
-                for commune in data:
-                    code = commune.get("code")
-                    centre = commune.get("centre")
-                    if code and centre and "coordinates" in centre:
-                        lon, lat = centre["coordinates"]
-                        _GEO_CACHE[code] = [lat, lon]
-                    elif code:
-                        _GEO_CACHE[code] = None
-                        
-                # Marquer les codes toujours introuvables comme None pour ne pas les re-chercher
-                for code in codes_to_fetch:
-                    if code not in _GEO_CACHE:
-                        _GEO_CACHE[code] = None
-                        
-                save_cache(_GEO_CACHE)
-            else:
-                logger.error(f"Erreur API ({response.status_code}) lors de la récupération globale.")
-        except Exception as e:
-            logger.error(f"Erreur de connexion à l'API : {e}")
-
-    # Récupération depuis le cache (mis à jour)
-    for code in codes_insee:
-        val = _GEO_CACHE.get(code)
-        results[code] = tuple(val) if val else None
+    try:
+        puissance = float(row.get('Puissance_kW')) if not pd.isna(row.get('Puissance_kW')) else 0
+    except ValueError:
+        puissance = 0
         
-    return results
+    nom = str(row.get('Nom_du_Parc_Solaire'))
+    
+    cache_key = f"{insee}_{nom}_{iris}"
+    
+    if cache_key in _GEO_CACHE:
+        val = _GEO_CACHE[cache_key]
+        return val[0], val[1] if val else (None, None)
+        
+    lat, lon = None, None
+    
+    # Niveau 1: Overpass (Grand parc)
+    if puissance > 1000:
+        logger.info(f"Geocoding {nom} (>1000kW) via Overpass...")
+        coords = overpass_geocode(insee)
+        if coords:
+            lat, lon = coords
+            
+    # Niveau 2: IRIS
+    if lat is None and lon is None and iris and iris != "nan":
+        if iris in iris_dict:
+            lat, lon = iris_dict[iris]
+            
+    # Niveau 3: INSEE (Mairie)
+    if lat is None and lon is None:
+        insee_dict = get_insee_dict()
+        if insee in insee_dict:
+            lat, lon = insee_dict[insee]
+            
+    _GEO_CACHE[cache_key] = [lat, lon] if lat and lon else None
+    
+    return lat, lon if lat and lon else (None, None)
 
-def get_coordinates(code_insee):
-    res = get_coordinates_batch([code_insee])
-    return res.get(code_insee)
+def flush_cache():
+    save_cache(_GEO_CACHE)
