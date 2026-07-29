@@ -278,7 +278,7 @@ def main():
         # Ajout du contrôle de calques (pour basculer entre les fonds de carte)
         folium.LayerControl(position='topright').add_to(m)
     
-        st_folium(m, use_container_width=True, height=850)
+        st_folium(m, use_container_width=True, height=850, returned_objects=[])
 
     with tab_analysis:
         st.markdown("### 📈 Vue d'ensemble")
